@@ -38,9 +38,11 @@ class BoundingVolumeHierarchy
 {
 public:
   using device_type = DeviceType;
+  using execution_space = device_type::execution_space;
   using bounding_volume_type = Box;
   using size_type = typename DeviceType::memory_space::size_type;
 
+  std::vector<execution_space> stream_list;
   BoundingVolumeHierarchy() = default; // build an empty tree
 
   template <typename Primitives>
@@ -85,7 +87,7 @@ public:
                       std::is_same<Tag, Details::SpatialPredicateTag>::value,
                   "Invalid tag for the predicates");
     Details::BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
-        Tag{}, *this, predicates, std::forward<Args>(args)...);
+        Tag{}, *this, predicates, stream_list, std::forward<Args>(args)...);
   }
 
 private:
@@ -136,12 +138,23 @@ using BVH = BoundingVolumeHierarchy<DeviceType>;
 template <typename DeviceType>
 template <typename Primitives>
 BoundingVolumeHierarchy<DeviceType>::BoundingVolumeHierarchy(
+    int stream_count,
     Primitives const &primitives)
     : _size(Traits::Access<Primitives, Traits::PrimitivesTag>::size(primitives))
     , _internal_and_leaf_nodes(
           Kokkos::ViewAllocateWithoutInitializing("internal_and_leaf_nodes"),
           _size > 0 ? 2 * _size - 1 : 0)
 {
+  for (int s = 0; s< stream_count; s++) {
+#ifdef KOKKOS_ENABLE_CUDA
+     cudaStream_t stream;
+     cudaStreamCreate(&stream);
+     execution_space es(stream);
+#else
+     execution_space es();
+#endif
+     stream_list.emplace_back(es);    
+  }
   Kokkos::Profiling::pushRegion("ArborX:BVH:construction");
 
   using Access = Traits::Access<Primitives, Traits::PrimitivesTag>;

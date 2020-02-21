@@ -108,17 +108,20 @@ struct CallbackDefaultNearestPredicateWithDistance
 template <typename DeviceType>
 struct BoundingVolumeHierarchyImpl
 {
+  
+
   // Views are passed by reference here because internally Kokkos::realloc()
   // is called.
   template <typename Predicates>
   static void queryDispatch(SpatialPredicateTag,
                             BoundingVolumeHierarchy<DeviceType> const &bvh,
                             Predicates const &predicates,
+                            std::vector< typename DeviceType::execution_space > & space_list,
                             Kokkos::View<int *, DeviceType> &indices,
                             Kokkos::View<int *, DeviceType> &offset,
                             int buffer_size = 0)
   {
-    queryDispatch(SpatialPredicateTag{}, bvh, predicates,
+    queryDispatch(SpatialPredicateTag{}, bvh, predicates, space_list,
                   CallbackDefaultSpatialPredicate{}, indices, offset,
                   buffer_size);
   }
@@ -128,7 +131,9 @@ struct BoundingVolumeHierarchyImpl
       std::is_same<typename Callback::tag, InlineCallbackTag>::value>
   queryDispatch(SpatialPredicateTag,
                 BoundingVolumeHierarchy<DeviceType> const &bvh,
-                Predicates const &predicates, Callback const &callback,
+                Predicates const &predicates, 
+                std::vector< typename DeviceType::execution_space > & space_list,
+                Callback const &callback,
                 OutputView &out, Kokkos::View<int *, DeviceType> &offset,
                 int buffer_size = 0);
 
@@ -137,12 +142,14 @@ struct BoundingVolumeHierarchyImpl
       std::is_same<typename Callback::tag, PostCallbackTag>::value>
   queryDispatch(SpatialPredicateTag,
                 BoundingVolumeHierarchy<DeviceType> const &bvh,
-                Predicates const &predicates, Callback const &callback,
+                Predicates const &predicates, 
+                std::vector< typename DeviceType::execution_space > & space_list,
+                Callback const &callback,
                 OutputView &out, Kokkos::View<int *, DeviceType> &offset,
                 int buffer_size = 0)
   {
     Kokkos::View<int *, DeviceType> indices("indices", 0);
-    queryDispatch(SpatialPredicateTag{}, bvh, predicates, indices, offset,
+    queryDispatch(SpatialPredicateTag{}, bvh, predicates, space_list, indices, offset,
                   buffer_size);
     callback(predicates, offset, indices, out);
   }
@@ -152,7 +159,9 @@ struct BoundingVolumeHierarchyImpl
       std::is_same<typename Callback::tag, InlineCallbackTag>::value>
   queryDispatch(
       NearestPredicateTag, BoundingVolumeHierarchy<DeviceType> const &bvh,
-      Predicates const &predicates, Callback const &callback, OutputView &out,
+      Predicates const &predicates, 
+      std::vector< typename DeviceType::execution_space > & space_list,
+      Callback const &callback, OutputView &out,
       Kokkos::View<int *, DeviceType> &offset,
       NearestQueryAlgorithm which = NearestQueryAlgorithm::StackBased_Default);
 
@@ -161,13 +170,15 @@ struct BoundingVolumeHierarchyImpl
       std::is_same<typename Callback::tag, PostCallbackTag>::value>
   queryDispatch(
       NearestPredicateTag, BoundingVolumeHierarchy<DeviceType> const &bvh,
-      Predicates const &predicates, Callback const &callback, OutputView &out,
+      Predicates const &predicates, 
+      std::vector< typename DeviceType::execution_space > & space_list,
+      Callback const &callback, OutputView &out,
       Kokkos::View<int *, DeviceType> &offset,
       NearestQueryAlgorithm which = NearestQueryAlgorithm::StackBased_Default)
   {
     Kokkos::View<Kokkos::pair<int, double> *, DeviceType> pairs(
         "pairs_index_distance", 0);
-    queryDispatch(NearestPredicateTag{}, bvh, predicates,
+    queryDispatch(NearestPredicateTag{}, bvh, predicates, space_list,
                   CallbackDefaultNearestPredicateWithDistance{}, pairs, offset,
                   which);
     callback(predicates, offset, pairs, out);
@@ -176,37 +187,53 @@ struct BoundingVolumeHierarchyImpl
   template <typename Predicates>
   static void queryDispatch(
       NearestPredicateTag, BoundingVolumeHierarchy<DeviceType> const &bvh,
-      Predicates const &predicates, Kokkos::View<int *, DeviceType> &indices,
+      Predicates const &predicates, 
+      std::vector< typename DeviceType::execution_space > & space_list,
+      Kokkos::View<int *, DeviceType> &indices,
       Kokkos::View<int *, DeviceType> &offset,
       NearestQueryAlgorithm which = NearestQueryAlgorithm::StackBased_Default)
   {
-    queryDispatch(NearestPredicateTag{}, bvh, predicates,
+    queryDispatch(NearestPredicateTag{}, bvh, predicates, space_list,
                   CallbackDefaultNearestPredicate{}, indices, offset, which);
   }
 
   template <typename Predicates>
   static void queryDispatch(
       NearestPredicateTag, BoundingVolumeHierarchy<DeviceType> const &bvh,
-      Predicates const &predicates, Kokkos::View<int *, DeviceType> &indices,
+      Predicates const &predicates, 
+      std::vector< typename DeviceType::execution_space > & space_list,
+      Kokkos::View<int *, DeviceType> &indices,
       Kokkos::View<int *, DeviceType> &offset,
       Kokkos::View<double *, DeviceType> &distances,
-      NearestQueryAlgorithm which = NearestQueryAlgorithm::StackBased_Default)
+      NearestQueryAlgorithm which = NearestQueryAlgorithm::StackBased_Default
+      std::vector<Kokkos::RangePolicy<ExecutionSpace> > policy_list)
   {
     Kokkos::View<Kokkos::pair<int, double> *, DeviceType> out(
         "pairs_index_distance", 0);
-    queryDispatch(NearestPredicateTag{}, bvh, predicates,
+    queryDispatch(NearestPredicateTag{}, bvh, predicates, space_list
                   CallbackDefaultNearestPredicateWithDistance{}, out, offset,
                   which);
     auto const n = out.extent(0);
     reallocWithoutInitializing(indices, n);
     reallocWithoutInitializing(distances, n);
     using ExecutionSpace = typename DeviceType::execution_space;
-    Kokkos::parallel_for(ARBORX_MARK_REGION("split_pairs"),
-                         Kokkos::RangePolicy<ExecutionSpace>(0, n),
+    using search_policy = Kokkos::RangePolicy<ExecutionSpace>;
+
+    int stream_count = policy_list.size();
+    int list_size = (n / stream_count) + 1;
+    int pos = 0;
+
+    std::for_each( space_list.begin(), policy_list.end(), [] (ExecutionSpace &es) {
+       int end = min(pos+list_size, n);
+       search_policy sp(es, pos, end);
+       Kokkos::parallel_for(ARBORX_MARK_REGION("split_pairs"),
+                         sp,
                          KOKKOS_LAMBDA(int i) {
                            indices(i) = out(i).first;
                            distances(i) = out(i).second;
                          });
+       pos += list_size;
+    }
   }
 };
 
@@ -220,7 +247,9 @@ template <typename Predicates, typename OutputView, typename Callback>
 std::enable_if_t<std::is_same<typename Callback::tag, InlineCallbackTag>::value>
 BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
     NearestPredicateTag, BoundingVolumeHierarchy<DeviceType> const &bvh,
-    Predicates const &predicates, Callback const &callback, OutputView &out,
+    Predicates const &predicates, 
+    std::vector< typename DeviceType::execution_space > & space_list,
+    Callback const &callback, OutputView &out,
     Kokkos::View<int *, DeviceType> &offset, NearestQueryAlgorithm which)
 {
   static_assert(is_detected<NearestPredicateInlineCallbackArchetypeExpression,
@@ -231,6 +260,7 @@ BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
   Kokkos::Profiling::pushRegion("ArborX:BVH:nearest_queries");
 
   using ExecutionSpace = typename DeviceType::execution_space;
+  using search_policy = Kokkos::RangePolicy<ExecutionSpace>;
 
   bool const use_deprecated_nearest_query_algorithm =
       which == NearestQueryAlgorithm::PriorityQueueBased_Deprecated;
@@ -268,18 +298,25 @@ BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
   auto tmp_offset = cloneWithoutInitializingNorCopying(offset);
   if (use_deprecated_nearest_query_algorithm)
   {
-    Kokkos::parallel_for(
-        ARBORX_MARK_REGION("perform_deprecated_nearest_queries"),
-        Kokkos::RangePolicy<ExecutionSpace>(0, n_queries),
-        KOKKOS_LAMBDA(int i) {
-          int count = 0;
-          auto const shift = offset(permute(i));
-          auto const &query = queries(i);
-          Details::TreeTraversal<DeviceType>::query(
-              bvh, query,
-              [&query, &callback, &out, shift, &count](int index,
+    int stream_count = policy_list.size();
+    int list_size = (n_queries / stream_count) + 1;
+    int pos = 0;
+
+    std::for_each( space_list.begin(), policy_list.end(), [] (ExecutionSpace &es) {
+       int end = min(pos+list_size, n_queries);
+       search_policy sp(es, pos, end);
+       Kokkos::parallel_for(
+           ARBORX_MARK_REGION("perform_deprecated_nearest_queries"),
+           sp,
+           KOKKOS_LAMBDA(int i) {
+             int count = 0;
+             auto const shift = offset(permute(i));
+             auto const &query = queries(i);
+             Details::TreeTraversal<DeviceType>::query(
+                 bvh, query,
+                 [&query, &callback, &out, shift, &count](int index,
                                                        double distance) {
-                callback(query, index, distance,
+                 callback(query, index, distance,
                          [&out, shift, &count](
                              typename OutputView::value_type const &value) {
                            out(shift + count++) = value;
@@ -287,6 +324,8 @@ BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
               });
           tmp_offset(permute(i)) = count;
         });
+        pos += list_size;
+     }
   }
   else
   {
@@ -298,18 +337,25 @@ BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
     Kokkos::View<Kokkos::pair<int, double> *, DeviceType> buffer(
         Kokkos::ViewAllocateWithoutInitializing("buffer"), n_results);
 
-    Kokkos::parallel_for(
-        ARBORX_MARK_REGION("perform_nearest_queries"),
-        Kokkos::RangePolicy<ExecutionSpace>(0, n_queries),
-        KOKKOS_LAMBDA(int i) {
-          int count = 0;
-          auto const shift = offset(permute(i));
-          auto const &query = queries(i);
-          Details::TreeTraversal<DeviceType>::query(
-              bvh, query,
-              [&query, &callback, &out, shift, &count](int index,
+    int stream_count = policy_list.size();
+    int list_size = (n_queries / stream_count) + 1;
+    int pos = 0;
+
+    std::for_each( space_list.begin(), policy_list.end(), [] (ExecutionSpace &es) {
+       int end = min(pos+list_size, n_queries);
+       search_policy sp(es, pos, end);
+       Kokkos::parallel_for(
+           ARBORX_MARK_REGION("perform_nearest_queries"),
+           sp,
+           KOKKOS_LAMBDA(int i) {
+             int count = 0;
+             auto const shift = offset(permute(i));
+             auto const &query = queries(i);
+             Details::TreeTraversal<DeviceType>::query(
+                 bvh, query,
+                 [&query, &callback, &out, shift, &count](int index,
                                                        double distance) {
-                callback(query, index, distance,
+                    callback(query, index, distance,
                          [&out, shift, &count](
                              typename OutputView::value_type const &value) {
                            out(shift + count++) = value;
@@ -320,6 +366,8 @@ BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
                                                 offset(permute(i) + 1))));
           tmp_offset(permute(i)) = count;
         });
+        pos += list_size;
+     }
   }
 
   Kokkos::Profiling::popRegion();
@@ -335,8 +383,15 @@ BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
     OutputView tmp_out(Kokkos::ViewAllocateWithoutInitializing(out.label()),
                        n_tmp_results);
 
-    Kokkos::parallel_for(ARBORX_MARK_REGION("copy_valid_entries"),
-                         Kokkos::RangePolicy<ExecutionSpace>(0, n_queries),
+    int stream_count = policy_list.size();
+    int list_size = (n_queries / stream_count) + 1;
+    int pos = 0;
+
+    std::for_each( space_list.begin(), policy_list.end(), [] (ExecutionSpace &es) {
+       int end = min(pos+list_size, n_queries);
+       search_policy sp(es, pos, end);
+       Kokkos::parallel_for(ARBORX_MARK_REGION("copy_valid_entries"),
+                         sp,
                          KOKKOS_LAMBDA(int q) {
                            for (int i = 0;
                                 i < tmp_offset(q + 1) - tmp_offset(q); ++i)
@@ -344,6 +399,8 @@ BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
                              tmp_out(tmp_offset(q) + i) = out(offset(q) + i);
                            }
                          });
+       pos+=list_size;
+    }
     out = tmp_out;
     offset = tmp_offset;
   }
@@ -366,7 +423,9 @@ template <typename Predicates, typename OutputView, typename Callback>
 std::enable_if_t<std::is_same<typename Callback::tag, InlineCallbackTag>::value>
 BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
     SpatialPredicateTag, BoundingVolumeHierarchy<DeviceType> const &bvh,
-    Predicates const &predicates, Callback const &callback, OutputView &out,
+    Predicates const &predicates, 
+    std::vector< typename DeviceType::execution_space > & space_list,
+    Callback const &callback, OutputView &out,
     Kokkos::View<int *, DeviceType> &offset, int buffer_size)
 {
   static_assert(is_detected<SpatialPredicateInlineCallbackArchetypeExpression,
@@ -377,6 +436,7 @@ BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
   Kokkos::Profiling::pushRegion("ArborX:BVH:spatial_queries");
 
   using ExecutionSpace = typename DeviceType::execution_space;
+  using search_policy = Kokkos::RangePolicy<ExecutionSpace>;
 
   using Access = Traits::Access<Predicates, Traits::PredicatesTag>;
   auto const n_queries = Access::size(predicates);
@@ -421,10 +481,17 @@ BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
     // NOTE I considered filling with invalid indices but it is unecessary
     // work
 
-    Kokkos::parallel_for(
-        ARBORX_MARK_REGION("first_pass_at_the_search_with_buffer_optimization"),
-        Kokkos::RangePolicy<ExecutionSpace>(0, n_queries),
-        KOKKOS_LAMBDA(int i) {
+    int stream_count = policy_list.size();
+    int list_size = (n_queries / stream_count) + 1;
+    int pos = 0;
+
+    std::for_each( space_list.begin(), policy_list.end(), [] (ExecutionSpace &es) {
+       int end = min(pos+list_size, n_queries);
+       search_policy sp(es, pos, end);
+       Kokkos::parallel_for(
+          ARBORX_MARK_REGION("first_pass_at_the_search_with_buffer_optimization"),
+          sp,
+          KOKKOS_LAMBDA(int i) {
           int count = 0;
           auto const shift = permute(i) * buffer_size;
           auto const &query = queries(i);
@@ -445,25 +512,36 @@ BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
               });
           offset(permute(i)) = count;
         });
+        pos += list_size;
+     }
   }
   else
   {
-    Kokkos::parallel_for(
-        ARBORX_MARK_REGION(
+    int stream_count = policy_list.size();
+    int list_size = (n_queries / stream_count) + 1;
+    int pos = 0;
+
+    std::for_each( space_list.begin(), policy_list.end(), [] (ExecutionSpace &es) {
+       int end = min(pos+list_size, n_queries);
+       search_policy sp(es, pos, end);
+       Kokkos::parallel_for(
+           ARBORX_MARK_REGION(
             "first_pass_at_the_search_count_the_number_of_values"),
-        Kokkos::RangePolicy<ExecutionSpace>(0, n_queries),
-        KOKKOS_LAMBDA(int i) {
-          int count = 0;
-          auto const &query = queries(i);
-          Details::TreeTraversal<DeviceType>::query(
-              bvh, query, [&query, &callback, &count](int index) {
-                callback(query, index,
+           sp,
+           KOKKOS_LAMBDA(int i) {
+             int count = 0;
+             auto const &query = queries(i);
+             Details::TreeTraversal<DeviceType>::query(
+                 bvh, query, [&query, &callback, &count](int index) {
+                   callback(query, index,
                          [&count](typename OutputView::value_type const &) {
                            ++count;
                          });
               });
-          offset(permute(i)) = count;
-        });
+             offset(permute(i)) = count;
+           });
+         pos += list_size;
+     }
   }
 
   // NOTE max() internally calls Kokkos::parallel_reduce.  Only pay for it if
@@ -503,24 +581,33 @@ BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
     //   ^     ^     ^         ^     ^
     //   0     2     4         2N-2  2N
     reallocWithoutInitializing(out, n_results);
-    Kokkos::parallel_for(
-        ARBORX_MARK_REGION("second_pass"),
-        Kokkos::RangePolicy<ExecutionSpace>(0, n_queries),
-        KOKKOS_LAMBDA(int i) {
-          int count = 0;
-          auto const shift = offset(permute(i));
-          auto const &query = queries(i);
-          Details::TreeTraversal<DeviceType>::query(
-              bvh, query, [&query, &callback, &out, shift, &count](int index) {
-                callback(query, index,
-                         [&count, &out,
-                          shift](typename OutputView::value_type const &value) {
-                           out(shift + count++) = value;
-                         });
-              });
-          assert(offset(permute(i) + 1) - offset(permute(i)) == count);
-        });
 
+    int stream_count = policy_list.size();
+    int list_size = (n_queries / stream_count) + 1;
+    int pos = 0;
+
+    std::for_each( space_list.begin(), policy_list.end(), [] (ExecutionSpace &es) {
+       int end = min(pos+list_size, n_queries);
+       search_policy sp(es, pos, end);
+       Kokkos::parallel_for(
+           ARBORX_MARK_REGION("second_pass"),
+           sp,
+           KOKKOS_LAMBDA(int i) {
+             int count = 0;
+             auto const shift = offset(permute(i));
+             auto const &query = queries(i);
+             Details::TreeTraversal<DeviceType>::query(
+                 bvh, query, [&query, &callback, &out, shift, &count](int index) {
+                   callback(query, index,
+                            [&count, &out,
+                             shift](typename OutputView::value_type const &value) {
+                              out(shift + count++) = value;
+                            });
+                 });
+             assert(offset(permute(i) + 1) - offset(permute(i)) == count);
+           });
+       pos += list_size;
+    }
     Kokkos::Profiling::popRegion();
   }
   // do not copy if by some miracle each query exactly yielded as many results
@@ -531,14 +618,24 @@ BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
 
     OutputView tmp_out(Kokkos::ViewAllocateWithoutInitializing(out.label()),
                        n_results);
-    Kokkos::parallel_for(ARBORX_MARK_REGION("copy_valid_values"),
-                         Kokkos::RangePolicy<ExecutionSpace>(0, n_queries),
+
+    int stream_count = policy_list.size();
+    int list_size = (n_queries / stream_count) + 1;
+    int pos = 0;
+
+    std::for_each( space_list.begin(), policy_list.end(), [] (ExecutionSpace &es) {
+       int end = min(pos+list_size, n_queries);
+       search_policy sp(es, pos, end);
+       Kokkos::parallel_for(ARBORX_MARK_REGION("copy_valid_values"),
+                         sp,
                          KOKKOS_LAMBDA(int q) {
                            for (int i = 0; i < offset(q + 1) - offset(q); ++i)
                            {
                              tmp_out(offset(q) + i) = out(q * buffer_size + i);
                            }
                          });
+        pos += list_size;
+    }
     out = tmp_out;
 
     Kokkos::Profiling::popRegion();
