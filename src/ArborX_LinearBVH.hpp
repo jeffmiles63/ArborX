@@ -38,12 +38,15 @@ class BoundingVolumeHierarchy
 {
 public:
   using device_type = DeviceType;
-  using execution_space = device_type::execution_space;
+  using execution_space = typename device_type::execution_space;
   using bounding_volume_type = Box;
   using size_type = typename DeviceType::memory_space::size_type;
 
   std::vector<execution_space> stream_list;
   BoundingVolumeHierarchy() = default; // build an empty tree
+
+  template <typename Primitives>
+  BoundingVolumeHierarchy(int stream_count, Primitives const &primitives);
 
   template <typename Primitives>
   BoundingVolumeHierarchy(Primitives const &primitives);
@@ -134,6 +137,12 @@ private:
 
 template <typename DeviceType>
 using BVH = BoundingVolumeHierarchy<DeviceType>;
+
+template <typename DeviceType>
+template <typename Primitives>
+BoundingVolumeHierarchy<DeviceType>::BoundingVolumeHierarchy(
+    Primitives const &primitives) : BoundingVolumeHierarchy( 1, primitives) {
+}
 
 template <typename DeviceType>
 template <typename Primitives>

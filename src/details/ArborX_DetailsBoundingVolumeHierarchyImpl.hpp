@@ -205,8 +205,7 @@ struct BoundingVolumeHierarchyImpl
       Kokkos::View<int *, DeviceType> &indices,
       Kokkos::View<int *, DeviceType> &offset,
       Kokkos::View<double *, DeviceType> &distances,
-      NearestQueryAlgorithm which = NearestQueryAlgorithm::StackBased_Default
-      std::vector<Kokkos::RangePolicy<ExecutionSpace> > policy_list)
+      NearestQueryAlgorithm which = NearestQueryAlgorithm::StackBased_Default)
   {
     Kokkos::View<Kokkos::pair<int, double> *, DeviceType> out(
         "pairs_index_distance", 0);
@@ -219,7 +218,7 @@ struct BoundingVolumeHierarchyImpl
     using ExecutionSpace = typename DeviceType::execution_space;
     using search_policy = Kokkos::RangePolicy<ExecutionSpace>;
 
-    int stream_count = policy_list.size();
+    int stream_count = space_list.size();
     int list_size = (n / stream_count) + 1;
     int pos = 0;
 
