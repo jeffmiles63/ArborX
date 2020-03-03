@@ -42,11 +42,12 @@ public:
   using bounding_volume_type = Box;
   using size_type = typename DeviceType::memory_space::size_type;
 
-  std::vector<execution_space> stream_list;
+  execution_space * space_list = nullptr;
+  int space_count = 0;
   BoundingVolumeHierarchy() = default; // build an empty tree
 
   template <typename Primitives>
-  BoundingVolumeHierarchy(int stream_count, Primitives const &primitives);
+  BoundingVolumeHierarchy(int space_count, Primitives const &primitives);
 
   template <typename Primitives>
   BoundingVolumeHierarchy(Primitives const &primitives);
@@ -90,7 +91,7 @@ public:
                       std::is_same<Tag, Details::SpatialPredicateTag>::value,
                   "Invalid tag for the predicates");
     Details::BoundingVolumeHierarchyImpl<DeviceType>::queryDispatch(
-        Tag{}, *this, predicates, stream_list, std::forward<Args>(args)...);
+        Tag{}, space_count, *this, space_list, predicates, std::forward<Args>(args)...);
   }
 
 private:
@@ -144,25 +145,35 @@ BoundingVolumeHierarchy<DeviceType>::BoundingVolumeHierarchy(
     Primitives const &primitives) : BoundingVolumeHierarchy( 1, primitives) {
 }
 
+template <class ExecutionSpace>
+void ConstructNewExecSpace( ExecutionSpace * es ) {
+  new (es) ExecutionSpace();
+}
+
+#ifdef KOKKOS_ENABLE_CUDA  
+template <>
+void ConstructNewExecSpace<Kokkos::Cuda>( Kokkos::Cuda * es ) {
+  cudaStream_t stream;
+  cudaStreamCreate(&stream);
+  new (es) Kokkos::Cuda(stream);
+}
+#endif
+
 template <typename DeviceType>
 template <typename Primitives>
 BoundingVolumeHierarchy<DeviceType>::BoundingVolumeHierarchy(
-    int stream_count,
+    int space_count_,
     Primitives const &primitives)
     : _size(Traits::Access<Primitives, Traits::PrimitivesTag>::size(primitives))
     , _internal_and_leaf_nodes(
           Kokkos::ViewAllocateWithoutInitializing("internal_and_leaf_nodes"),
           _size > 0 ? 2 * _size - 1 : 0)
 {
-  for (int s = 0; s< stream_count; s++) {
-#ifdef KOKKOS_ENABLE_CUDA
-     cudaStream_t stream;
-     cudaStreamCreate(&stream);
-     execution_space es(stream);
-#else
-     execution_space es();
-#endif
-     stream_list.emplace_back(es);    
+  space_count = space_count_;
+  space_list = new execution_space[space_count];
+
+  for (int s = 0; s< space_count; s++) {
+     ConstructNewExecSpace(&space_list[0]);
   }
   Kokkos::Profiling::pushRegion("ArborX:BVH:construction");
 
